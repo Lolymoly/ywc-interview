@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Toaster } from "@/components/ui/toaster"
@@ -34,6 +34,7 @@ export default function AdminPage() {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split("T")[0])
   const [isLoading, setIsLoading] = useState(false)
   const [candidateStatuses, setCandidateStatuses] = useState<Record<string, { note?: string; status: string }>>({})
+  const [hasFetchedCandidates, setHasFetchedCandidates] = useState(false)
 
   // Track mapping for display
   const trackMapping: Record<string, string> = {
@@ -70,9 +71,54 @@ export default function AdminPage() {
       setCandidateStatuses(JSON.parse(savedStatuses))
     }
 
-    // Load candidates data
-    fetchCandidates()
-  }, [selectedDate])
+    // Load candidates data only if not already loaded
+    if (!hasFetchedCandidates) {
+      loadCandidatesData()
+    } else {
+      // If we have loaded candidates but changed the date, we need to update timeSlot assignments
+      updateCandidateTimeSlots()
+    }
+  }, [selectedDate, hasFetchedCandidates])
+
+  const loadCandidatesData = async () => {
+    // First check if we have cached candidates
+    const cachedCandidates = localStorage.getItem('ywc20_cached_candidates')
+    
+    if (cachedCandidates) {
+      // Use cached data
+      setCandidates(JSON.parse(cachedCandidates))
+      setHasFetchedCandidates(true)
+      // Update time slots with current assignments
+      updateCandidateTimeSlots()
+    } else {
+      // No cache, fetch from API
+      await fetchCandidates()
+    }
+  }
+
+  const updateCandidateTimeSlots = () => {
+    if (assignments.length > 0) {
+      setCandidates(prevCandidates => {
+        const updatedCandidates = { ...prevCandidates }
+        
+        Object.keys(updatedCandidates).forEach((track) => {
+          updatedCandidates[track] = updatedCandidates[track].map((candidate) => {
+            const assignment = assignments.find((a) => a.candidateId === candidate.id && a.track === track)
+            if (assignment) {
+              return {
+                ...candidate,
+                timeSlot: assignment.slotId,
+                interviewFormat: assignment.interviewFormat,
+              }
+            }
+            return candidate
+          })
+        })
+        
+        return updatedCandidates
+      })
+    }
+  }
 
   const fetchCandidates = async () => {
     setIsLoading(true)
@@ -118,6 +164,9 @@ export default function AdminPage() {
         }
       })
 
+      // Cache the candidates in localStorage
+      localStorage.setItem('ywc20_cached_candidates', JSON.stringify(transformedCandidates))
+      
       // Update candidates with their assigned time slots from assignments
       if (assignments.length > 0) {
         Object.keys(transformedCandidates).forEach((track) => {
@@ -136,6 +185,7 @@ export default function AdminPage() {
       }
 
       setCandidates(transformedCandidates)
+      setHasFetchedCandidates(true)
     } catch (error) {
       console.error("Error fetching candidates:", error)
       toast({
@@ -430,6 +480,14 @@ export default function AdminPage() {
     router.push("/admin-login")
   }
 
+  // Add a refresh function to manually refresh candidate data
+  const refreshCandidates = async () => {
+    await fetchCandidates()
+    toast({
+      title: "รีเฟรชข้อมูลผู้สมัครสำเร็จ",
+    })
+  }
+
   return (
     <main className="flex min-h-screen flex-col bg-gradient-to-b from-red-950 to-black text-white">
       <div className="container mx-auto p-4">
@@ -467,6 +525,14 @@ export default function AdminPage() {
               >
                 <Save className="h-4 w-4 mr-2" />
                 บันทึก
+              </Button>
+              <Button
+                onClick={refreshCandidates}
+                variant="outline"
+                className="border-red-500 text-red-400 hover:bg-red-500 hover:text-white flex-1 sm:flex-none"
+                disabled={isLoading}
+              >
+                {isLoading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}
               </Button>
               <Button
                 onClick={handleLogout}
@@ -535,12 +601,14 @@ export default function AdminPage() {
                 </Select>
               </div>
               <div className="hidden sm:block">
-                <TabsList className="grid grid-cols-4 bg-red-950 mb-4">
-                  <TabsTrigger value="design">Design</TabsTrigger>
-                  <TabsTrigger value="content">Content</TabsTrigger>
-                  <TabsTrigger value="programming">Programming</TabsTrigger>
-                  <TabsTrigger value="marketing">Marketing</TabsTrigger>
-                </TabsList>
+                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                  <TabsList className="grid grid-cols-4 bg-red-950 mb-4">
+                    <TabsTrigger value="design">Design</TabsTrigger>
+                    <TabsTrigger value="content">Content</TabsTrigger>
+                    <TabsTrigger value="programming">Programming</TabsTrigger>
+                    <TabsTrigger value="marketing">Marketing</TabsTrigger>
+                  </TabsList>
+                </Tabs>
               </div>
 
               <div className="flex justify-end mb-4">
